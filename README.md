@@ -105,13 +105,43 @@ tunnel to be resilient.)
 
 ## Autostart
 
-**Windows** — a Startup shortcut or a Task Scheduler task running:
+**Windows (no admin) — Startup folder launcher.** This is the recommended
+per-user option; it needs no elevation. Drop a `docent.vbs` into your Startup
+folder (`Win+R` → `shell:startup`) that runs `serve` with **no console window**
+and logs to `%TEMP%\docent.log`:
 
-```
-pwsh -NoLogo -File <repo>\bin\docent.ps1 serve
+```vbs
+' docent.vbs  -- starts docent serve at login, hidden, no admin.
+Set shell = CreateObject("WScript.Shell")
+q = Chr(34)
+pwshPath   = "C:\Program Files\PowerShell\7\pwsh.exe"
+scriptPath = "C:\Users\me\Code\docent\bin\docent.ps1"
+logPath    = shell.ExpandEnvironmentStrings("%TEMP%\docent.log")
+
+' Doubled outer quotes are the cmd /c idiom for a spaced exe path + redirection.
+cmd = "cmd /c " & q & q & pwshPath & q & " -NoLogo -NoProfile -File " & q & scriptPath & q & _
+      " serve >> " & q & logPath & q & " 2>&1" & q
+shell.Run cmd, 0, False   ' 0 = hidden window, False = don't wait
 ```
 
-To create a logon task from an elevated PowerShell:
+Create it from PowerShell (adjust `scriptPath`), then verify:
+
+```powershell
+# ...write the .vbs above to:
+[Environment]::GetFolderPath('Startup')   # e.g. %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup
+wscript "$([Environment]::GetFolderPath('Startup'))\docent.vbs"   # start it now
+Invoke-WebRequest http://127.0.0.1:39787/health -UseBasicParsing  # -> 200 ok
+```
+
+To stop it: `Get-CimInstance Win32_Process -Filter "Name='pwsh.exe'" | Where CommandLine -match 'docent\.ps1' | % { Stop-Process $_.ProcessId -Force }`.
+To disable autostart: delete the `.vbs` from the Startup folder.
+
+> A plain Startup-folder **shortcut** to `pwsh -NoLogo -File <repo>\bin\docent.ps1 serve`
+> also works without admin, but flashes a console window at login; the `.vbs`
+> avoids that.
+
+**Windows (with admin) — Task Scheduler.** If you do have elevation and want it
+to survive logon more robustly:
 
 ```powershell
 $action  = New-ScheduledTaskAction -Execute 'pwsh' -Argument "-NoLogo -File $PWD\bin\docent.ps1 serve"
