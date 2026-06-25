@@ -9,6 +9,12 @@
   // through the reverse SSH tunnel. Must match the tunnel's RemoteForward.
   "port": 39787,
 
+  // Optional shared secret. When set, POST /open requires a matching
+  // `Authorization: Bearer <token>` header (GET /health stays open). grove sends
+  // it via GROVE_WEBHOOK_TOKEN. Prefer the $DOCENT_TOKEN env var over putting the
+  // secret in this file; the env var wins if both are set. Omit to disable auth.
+  // "token": "change-me-to-a-long-random-string",
+
   // Cursor process name used to enumerate/match windows.
   "processName": "Cursor",
 

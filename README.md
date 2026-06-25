@@ -103,6 +103,37 @@ Now when you SSH from the workstation to the dev box, the dev box's
 `ExitOnForwardFailure yes` and an `autossh`/keepalive setup if you want the
 tunnel to be resilient.)
 
+## Shared secret (optional auth)
+
+The `127.0.0.1` bind keeps docent off the network, but the reverse tunnel
+exposes the port to the dev box's loopback — and on Linux every local user can
+reach loopback. So on a shared dev box, *any* local process could `POST /open`.
+
+Set a shared secret to require it. When a token is configured, `POST /open`
+demands a matching `Authorization: Bearer <token>` header; `GET /health` stays
+open for liveness probes. With no token set, docent runs as before and logs a
+warning at startup.
+
+Configure the token via the `DOCENT_TOKEN` env var (preferred — keeps it out of
+the config file) or a `"token"` field in the config. The env var wins if both
+are set.
+
+```bash
+# workstation: start docent with a secret
+DOCENT_TOKEN='a-long-random-string' pwsh ./bin/docent.ps1 serve
+
+# authenticated open
+curl -X POST http://127.0.0.1:39787/open \
+  -H 'authorization: Bearer a-long-random-string' \
+  -H 'content-type: application/json' \
+  -d '{"host":"ubuntu","path":"/home/me/Code/salsa/my-feature","name":"my-feature"}'
+```
+
+On the dev box, give grove the same secret via `GROVE_WEBHOOK_TOKEN`; its
+`webhook` / `ssh-source-webhook` recipes send the Bearer header automatically.
+Comparison is constant-time, so a wrong token returns `401` without leaking
+length/timing.
+
 ## Autostart
 
 **Windows (no admin) — Startup folder launcher.** This is the recommended

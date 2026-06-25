@@ -90,6 +90,7 @@ function Get-DocentConfig {
     # functions that actually use them.
     $defaults = @{
         port             = 39787
+        token            = $null
         processName      = 'Cursor'
         cursorExe        = $null
         desktopName      = '{name}'

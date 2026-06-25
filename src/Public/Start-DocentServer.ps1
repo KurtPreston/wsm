@@ -31,6 +31,11 @@ function Start-DocentServer {
     $resolvedPort = if ($Port) { $Port } elseif ($cfg.port) { [int]$cfg.port } else { 39787 }
     $prefix = "http://127.0.0.1:$resolvedPort/"
 
+    # Optional shared secret. $env:DOCENT_TOKEN wins over config 'token' so the
+    # secret can stay out of the config file. When unset, POST /open is open to
+    # anything that can reach the loopback port (incl. the reverse SSH tunnel).
+    $token = if ($env:DOCENT_TOKEN) { $env:DOCENT_TOKEN } elseif ($cfg.token) { [string]$cfg.token } else { $null }
+
     $listener = [System.Net.HttpListener]::new()
     $listener.Prefixes.Add($prefix)
 
@@ -43,12 +48,18 @@ function Start-DocentServer {
 
     Write-DocentInfo "docent serving on $prefix (backend: $(Get-DocentBackendKind))"
     if ($cfg._path) { Write-DocentInfo "config: $($cfg._path)" } else { Write-DocentInfo "config: <defaults>" }
+    if ($token) {
+        Write-DocentInfo "auth: shared-secret token required for POST /open"
+    }
+    else {
+        Write-DocentWarn "auth: no token set (DOCENT_TOKEN or config 'token'); POST /open is unauthenticated"
+    }
 
     try {
         while ($listener.IsListening) {
             $context = $listener.GetContext()
             try {
-                Invoke-DocentRequest -Context $context -Config $cfg
+                Invoke-DocentRequest -Context $context -Config $cfg -Token $token
             }
             catch {
                 Write-DocentError "Unhandled request error: $($_.Exception.Message)"
@@ -68,7 +79,8 @@ function Invoke-DocentRequest {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][System.Net.HttpListenerContext]$Context,
-        [Parameter(Mandatory)][PSCustomObject]$Config
+        [Parameter(Mandatory)][PSCustomObject]$Config,
+        [AllowNull()][AllowEmptyString()][string]$Token
     )
 
     $req = $Context.Request
@@ -76,12 +88,22 @@ function Invoke-DocentRequest {
     $path = $req.Url.AbsolutePath
     Write-DocentDebug "$method $path from $($req.RemoteEndPoint)"
 
+    # /health stays unauthenticated so the tunnel can be probed for liveness.
     if ($method -eq 'GET' -and $path -eq '/health') {
         Send-DocentResponse -Context $Context -StatusCode 200 -Text 'ok'
         return
     }
 
     if ($method -eq 'POST' -and $path -eq '/open') {
+        if ($Token) {
+            $provided = Get-DocentBearerToken -Request $req
+            if (-not (Test-DocentTokenMatch -Expected $Token -Provided $provided)) {
+                Write-DocentWarn "Rejected $method $path from $($req.RemoteEndPoint): bad or missing token"
+                Send-DocentResponse -Context $Context -StatusCode 401 -Object @{ ok = $false; error = 'unauthorized' }
+                return
+            }
+        }
+
         $body = Read-DocentRequestBody -Request $req
         $payload = $null
         try {
@@ -121,6 +143,41 @@ function Invoke-DocentRequest {
     }
 
     Send-DocentResponse -Context $Context -StatusCode 404 -Object @{ ok = $false; error = 'not found' }
+}
+
+# Extract the token from an `Authorization: Bearer <token>` header, or $null.
+function Get-DocentBearerToken {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][System.Net.HttpListenerRequest]$Request)
+
+    $header = $Request.Headers['Authorization']
+    if (-not $header) { return $null }
+    if ($header -match '^(?i:Bearer)\s+(.+)$') { return $Matches[1].Trim() }
+    return $null
+}
+
+# Constant-time string comparison: avoids leaking the secret via response timing.
+# Compares every byte regardless of where a mismatch occurs (length is also
+# folded in so unequal lengths can never short-circuit).
+function Test-DocentTokenMatch {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][AllowEmptyString()][string]$Expected,
+        [AllowNull()][AllowEmptyString()][string]$Provided
+    )
+
+    if ([string]::IsNullOrEmpty($Expected) -or [string]::IsNullOrEmpty($Provided)) { return $false }
+
+    $a = [System.Text.Encoding]::UTF8.GetBytes($Expected)
+    $b = [System.Text.Encoding]::UTF8.GetBytes($Provided)
+    $diff = $a.Length -bxor $b.Length
+    $max = [Math]::Max($a.Length, $b.Length)
+    for ($i = 0; $i -lt $max; $i++) {
+        $x = if ($i -lt $a.Length) { $a[$i] } else { 0 }
+        $y = if ($i -lt $b.Length) { $b[$i] } else { 0 }
+        $diff = $diff -bor ($x -bxor $y)
+    }
+    return ($diff -eq 0)
 }
 
 # Read the full request body as a string using the request's content encoding.
