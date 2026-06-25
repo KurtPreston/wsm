@@ -1,0 +1,7 @@
+# Local config (may contain host-specific paths)
+rcd.config.json
+rcd.config.jsonc
+
+# PowerShell / editor noise
+*.log
+.vscode/

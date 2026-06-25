@@ -1,0 +1,42 @@
+{
+  // ~/.ssh/config alias for the remote Ubuntu host. Used both for the SSH
+  // resolver call and embedded into the remote URI below.
+  "host": "ubuntu",
+
+  // Default project, substituted as {project} in templates. Override per-call
+  // with `rcd open <ref> -Project other`.
+  "project": "salsa",
+
+  // Maps {ref} -> a remote absolute folder path printed on stdout. Any command
+  // that prints a path works (even a literal path).
+  "resolve": "echo /home/me/Code/{project}/{ref}",
+
+  // Optional: enumerate all workspaces for `rcd open-all`. Must emit id<TAB>path
+  // lines, one per workspace.
+  "list": "for d in /home/me/Code/{project}/*/; do printf '%s\\t%s\\n' \"$(basename \"$d\")\" \"${d%/}\"; done",
+
+  // Remote-SSH folder URI opened by Cursor. {path} comes from the resolver.
+  "uri": "vscode-remote://ssh-remote+{host}{path}",
+
+  // Virtual desktop name per workspace. Templated; use {project}/{ref} if refs
+  // collide across projects.
+  "desktopName": "{ref}",
+
+  // --- Optional tuning (defaults shown) ---
+
+  // Auto-detected if omitted (LOCALAPPDATA\Programs\cursor\Cursor.exe, etc.).
+  // "cursorExe": "C:\\Users\\me\\AppData\\Local\\Programs\\cursor\\Cursor.exe",
+
+  "processName": "Cursor",
+  "sshExe": "ssh",
+  "sshOptions": ["-o", "BatchMode=yes"],
+
+  // Login shell wrapper so PATH and resolver commands resolve in a
+  // non-interactive session.
+  "remoteShell": "bash -lc '{cmd}'",
+
+  // Window-launch tuning to ride out the folder-uri hang/no-op risk.
+  "launchTimeoutSec": 25,
+  "launchRetries": 2,
+  "launchDelaySec": 2
+}
