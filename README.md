@@ -130,7 +130,7 @@ curl -X POST http://127.0.0.1:39787/open \
 ```
 
 On the dev box, give grove the same secret via `GROVE_WEBHOOK_TOKEN`; its
-`webhook` / `ssh-source-webhook` recipes send the Bearer header automatically.
+`webhook` recipe sends the Bearer header automatically.
 Comparison is constant-time, so a wrong token returns `401` without leaking
 length/timing.
 
@@ -217,6 +217,9 @@ pwsh ./bin/docent.ps1 serve [-Port 39787] [-Config <path>]
 # Open or focus one workspace explicitly (no SSH).
 pwsh ./bin/docent.ps1 open -Host ubuntu -Path /home/me/Code/salsa/my-feature -Name my-feature
 
+# Open a URL in a browser window on a named desktop (mainly for testing links).
+pwsh ./bin/docent.ps1 open-url -Name my-feature -Url https://example.com/page
+
 # Focus an already-open workspace.
 pwsh ./bin/docent.ps1 focus -Path /home/me/Code/salsa/my-feature
 
@@ -252,11 +255,54 @@ field. Discovery order (first hit wins): `-Config <path>`, `$DOCENT_CONFIG`,
 | `cursorExe` | auto | explicit Cursor launcher (Win/macOS) |
 | `desktopName` | `{name}` | desktop name (Win) / window label (macOS) |
 | `uri` | `vscode-remote://ssh-remote+{host}{path}` | folder URI template |
+| `links` | `[]` | companion URLs to open on the same desktop (see [Companion links](#companion-links)) |
+| `browserExe` | auto | explicit browser launcher for links (Chrome/Edge/Brave on Win) |
+| `browserProcessName` | auto | process name used to match browser windows (Win) |
 | `launchTimeoutSec` / `launchRetries` / `launchDelaySec` | `25` / `2` / `2` | Windows folder-uri hang mitigations |
 
 The JSONC loader strips `//` and `/* */` comments and trailing commas while
 **preserving string literals**, so `vscode-remote://…` inside `uri` is never
 mistaken for a comment.
+
+## Companion links
+
+docent can open **companion URLs on the same virtual desktop** as the Cursor
+workspace — e.g. drop the matching issue tracker page next to your editor when a
+worktree opens. This needs **no change to the webhook**: the URL is *derived*
+from the `name` already in the `{host, path, name}` body. So whatever drives
+docent (grove, the CLI, your own script) stays a pure description of the
+worktree; the "what else to open on my workstation" policy lives here in config.
+
+Configure a `links` array. Each entry is `{ pattern, url, upper? }`:
+
+- `pattern` — a regex matched (case-insensitively) against `name`.
+- `url` — a template where `$1`, `$2`, … are replaced by `pattern`'s capture
+  groups (`$0` is the whole match).
+- `upper` — when `true`, capture groups are upper-cased before substitution.
+
+```jsonc
+"links": [
+  { "pattern": "^([a-z]+-\\d+)", "url": "https://jira.example.com/browse/$1", "upper": true }
+]
+```
+
+With this, a worktree named `salsa-12345-contracts-widget-npe` opens
+`https://jira.example.com/browse/SALSA-12345` in a browser window placed on the
+`salsa-12345-contracts-widget-npe` desktop. A `name` that matches no `pattern`
+behaves exactly as before — no extra window.
+
+Notes:
+
+- **Browser.** The link opens in a new window of the configured `browserExe`
+  (auto-detected: Chrome → Edge → Brave on Windows). On Windows docent launches
+  `--new-window <url>`, polls for the new window, and moves it onto the desktop.
+- **Focus stays on Cursor.** Link windows are *placed* on the desktop but not
+  brought to the foreground; docent re-foregrounds the Cursor window after.
+- **Focus-or-open.** If a browser window already sits on that desktop, docent
+  leaves it in place rather than stacking duplicates (so a re-open won't
+  re-navigate an existing link window).
+- **macOS** is window-only (no Spaces): the URL simply opens in a new browser
+  window with no desktop placement.
 
 ## OS backends
 
@@ -289,10 +335,12 @@ src/Private/
   Backend.macos.ps1       # macOS window control via cursor CLI + osascript
   Desktop.ps1             # Windows virtual-desktop wrappers (VirtualDesktop)
   Window.ps1              # Windows Cursor launch + window matching
+  Browser.ps1             # Windows browser launch + window matching (companion links)
   Native.ps1              # Windows Win32 interop (window enumeration/focus)
 src/Public/
   Start-DocentServer.ps1  # HttpListener webhook receiver (serve)
   Open-DocentWorkspace.ps1
+  Open-DocentUrl.ps1      # open a companion URL on a named desktop
   Focus-DocentWorkspace.ps1
   Close-DocentWorkspace.ps1
   Get-DocentStatus.ps1

@@ -32,6 +32,28 @@
   // JSONC loader -- it is NOT a comment.)
   "uri": "vscode-remote://ssh-remote+{host}{path}",
 
+  // --- Companion links (optional) ---
+  // Open companion URLs on the SAME virtual desktop as the Cursor workspace,
+  // derived from the webhook's {name}. Each entry is { pattern, url, upper? }:
+  //   pattern : regex matched (case-insensitively) against {name}
+  //   url     : template where $1, $2, ... are the capture groups of pattern
+  //   upper   : when true, capture groups are upper-cased before substitution
+  // Example: a worktree named "salsa-12345-..." opens its ticket in a browser.
+  // Branches that match no pattern behave exactly as before (no extra window).
+  // "links": [
+  //   { "pattern": "^([a-z]+-\\d+)", "url": "https://jira.example.com/browse/$1", "upper": true }
+  // ],
+
+  // Browser used to open companion links. Auto-detected when omitted:
+  //   Windows: Chrome, then Edge, then Brave in standard install locations
+  //   macOS:   the system default browser (via `open <url>`)
+  // "browserExe": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+
+  // Process name used to enumerate the browser's windows (Windows). Defaults to
+  // the browserExe filename without extension (e.g. "chrome"). Override only if
+  // your browser's window process differs from its launcher name.
+  // "browserProcessName": "chrome",
+
   // --- Windows folder-uri hang mitigations (defaults shown) ---
   // Ride out the known `--folder-uri vscode-remote://` no-op when Cursor is
   // already running: non-blocking launch, poll for the new window by title

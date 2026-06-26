@@ -94,6 +94,9 @@ function Get-DocentConfig {
         cursorExe        = $null
         desktopName      = '{name}'
         uri              = 'vscode-remote://ssh-remote+{host}{path}'
+        browserExe       = $null
+        browserProcessName = $null
+        links            = @()
         launchTimeoutSec = 25
         launchRetries    = 2
         launchDelaySec   = 2
@@ -121,6 +124,50 @@ function Get-DocentConfig {
 
     $cfg['_path'] = $path
     return [PSCustomObject]$cfg
+}
+
+# Derive companion URLs from a workspace name using the config's link policy.
+# Each entry in $Config.links is { pattern, url, upper? }:
+#   - pattern : a regex matched (case-insensitively) against $Name
+#   - url     : a template where $1, $2, ... are replaced by the capture groups
+#               of pattern (e.g. "https://jira.example.com/browse/$1")
+#   - upper   : when true, capture groups are upper-cased before substitution
+#               (e.g. branch leaf "salsa-12345" -> ticket "SALSA-12345")
+# Returns the list of derived URLs (empty when 'links' is absent or nothing
+# matches -> a total no-op for the caller).
+function Resolve-DocentLinks {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Name,
+        [Parameter(Mandatory)][PSCustomObject]$Config
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Name)) { return @() }
+    if (-not ($Config.PSObject.Properties.Name -contains 'links') -or -not $Config.links) { return @() }
+
+    $urls = @()
+    foreach ($link in $Config.links) {
+        $props = $link.PSObject.Properties.Name
+        if (($props -notcontains 'pattern') -or ($props -notcontains 'url')) { continue }
+        $pattern = [string]$link.pattern
+        $template = [string]$link.url
+        if (-not $pattern -or -not $template) { continue }
+
+        $m = [regex]::Match($Name, $pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        if (-not $m.Success) { continue }
+
+        $upper = ($props -contains 'upper') -and $link.upper
+        # Replace $0, $1, ... with the matched groups (highest index first so
+        # $10 is not clobbered by $1).
+        $url = $template
+        for ($g = $m.Groups.Count - 1; $g -ge 0; $g--) {
+            $val = $m.Groups[$g].Value
+            if ($upper) { $val = $val.ToUpperInvariant() }
+            $url = $url.Replace('$' + $g, $val)
+        }
+        $urls += $url
+    }
+    return $urls
 }
 
 # Replace {key} tokens in a template from a context hashtable. Unknown tokens

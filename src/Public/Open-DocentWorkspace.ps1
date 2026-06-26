@@ -46,6 +46,7 @@ function Open-DocentWorkspace {
     if ($existing) {
         Write-DocentInfo "Existing window for '$leaf'; focusing."
         Invoke-DocentFocusWindow -Config $cfg -Handle $existing -Name $deskName
+        Open-DocentWorkspaceLink -Config $cfg -Name $nameVal -DeskName $deskName -CursorHandle $existing -NoSwitch:$NoSwitch
         return [PSCustomObject]@{
             Action      = 'focused'
             Host        = $Host
@@ -60,6 +61,7 @@ function Open-DocentWorkspace {
     $handle = Invoke-DocentOpenWindow -Config $cfg -Uri $uri -Leaf $leaf -RemoteHost $Host
     Invoke-DocentPlaceWindow -Config $cfg -Handle $handle -Name $deskName -Target $target
     if (-not $NoSwitch) { Invoke-DocentFocusWindow -Config $cfg -Handle $handle -Name $deskName }
+    Open-DocentWorkspaceLink -Config $cfg -Name $nameVal -DeskName $deskName -CursorHandle $handle -NoSwitch:$NoSwitch
 
     [PSCustomObject]@{
         Action      = 'opened'
@@ -69,4 +71,31 @@ function Open-DocentWorkspace {
         Uri         = $uri
         Hwnd        = $handle.Hwnd
     }
+}
+
+# Open any companion links derived from the workspace name onto the same desktop
+# (a no-op when no 'links' entry matches). Link windows are placed but not
+# foregrounded; we then re-foreground the Cursor window so the editor stays
+# frontmost. Failures are logged, never thrown -- a broken link must not fail the
+# Cursor open.
+function Open-DocentWorkspaceLink {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][PSCustomObject]$Config,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Name,
+        [Parameter(Mandatory)][string]$DeskName,
+        [Parameter(Mandatory)]$CursorHandle,
+        [switch]$NoSwitch
+    )
+
+    $links = @(Resolve-DocentLinks -Name $Name -Config $Config)
+    if ($links.Count -eq 0) { return }
+
+    foreach ($url in $links) {
+        try { Open-DocentUrl -Name $Name -Url $url -ConfigObject $Config | Out-Null }
+        catch { Write-DocentWarn "link open failed for $url : $($_.Exception.Message)" }
+    }
+
+    # Keep Cursor frontmost after the place-only browser windows landed.
+    if (-not $NoSwitch) { Invoke-DocentFocusWindow -Config $Config -Handle $CursorHandle -Name $DeskName }
 }

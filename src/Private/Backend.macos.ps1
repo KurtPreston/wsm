@@ -140,6 +140,29 @@ return "0"
     else { Write-DocentWarn "Could not raise a Cursor window for '$Leaf'." }
 }
 
+# Open a URL in a browser (best-effort). macOS is window-only -- there are no
+# Spaces operations here, so the URL simply opens in a new browser window with
+# no desktop placement and no focus-matching. Uses the configured browserExe
+# when set, otherwise the system default browser via `open <url>`.
+function Open-DocentMacBrowser {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][PSCustomObject]$Config,
+        [Parameter(Mandatory)][string]$Url
+    )
+
+    if ($Config.browserExe) {
+        Write-DocentInfo "Opening URL in '$($Config.browserExe)' (new window)."
+        Write-DocentDebug "open -na $($Config.browserExe) --args --new-window $Url"
+        & open -na $Config.browserExe --args --new-window $Url 2>$null | Out-Null
+    }
+    else {
+        Write-DocentInfo "Opening URL in the default browser."
+        Write-DocentDebug "open $Url"
+        & open $Url 2>$null | Out-Null
+    }
+}
+
 # All Cursor window titles (for status / close).
 function Get-DocentMacWindowTitles {
     [CmdletBinding()]

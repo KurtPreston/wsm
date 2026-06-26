@@ -68,6 +68,45 @@ function Invoke-DocentOpenWindow {
     }
 }
 
+# Launch a browser window for $Url and return a handle. Windows: a placeable
+# HWND once it appears; macOS: best-effort open (window-only, Hwnd unused).
+function Invoke-DocentOpenUrlWindow {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][PSCustomObject]$Config,
+        [Parameter(Mandatory)][string]$Url
+    )
+    switch (Get-DocentBackendKind) {
+        'windows' {
+            $hwnd = Open-DocentBrowserWindow -Config $Config -Url $Url
+            return New-DocentHandle -Backend 'windows' -Hwnd $hwnd
+        }
+        'macos' {
+            Open-DocentMacBrowser -Config $Config -Url $Url
+            return New-DocentHandle -Backend 'macos'
+        }
+    }
+}
+
+# Locate a browser window already on the named desktop; $null if none. macOS is
+# window-only (no Spaces), so there is nothing to match -- always returns $null,
+# which makes the URL opener always open a fresh window there.
+function Find-DocentUrlWindowHandle {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][PSCustomObject]$Config,
+        [Parameter(Mandatory)][string]$DeskName
+    )
+    switch (Get-DocentBackendKind) {
+        'windows' {
+            $w = Find-DocentBrowserWindowOnDesktop -Config $Config -DeskName $DeskName
+            if ($w) { return New-DocentHandle -Backend 'windows' -Hwnd $w.Hwnd -Title $w.Title }
+            return $null
+        }
+        'macos' { return $null }
+    }
+}
+
 # Locate an existing Cursor window for the workspace; $null if none.
 function Find-DocentWindowHandle {
     [CmdletBinding()]
