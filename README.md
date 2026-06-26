@@ -136,10 +136,75 @@ length/timing.
 
 ## Autostart
 
-**Windows (no admin) — Startup folder launcher.** This is the recommended
-per-user option; it needs no elevation. Drop a `docent.vbs` into your Startup
-folder (`Win+R` → `shell:startup`) that runs `serve` with **no console window**
-and logs to `%TEMP%\docent.log`:
+On Windows, prefer the **Scheduled Task** below: it needs no admin and adds
+crash recovery. The Startup-folder `.vbs` is a simpler alternative if you don't
+want auto-restart.
+
+**Windows (no admin) — Scheduled Task with watchdog (recommended).** Starts
+docent at logon and keeps it alive: a 1-minute repeating trigger re-launches it
+if it ever dies, while `MultipleInstances=IgnoreNew` ensures a healthy docent is
+never duplicated. (Task Scheduler's built-in *"restart on failure"* is
+unreliable and often never fires — the repeating trigger is what actually
+works.) Registering a task that runs as *you* needs no elevation.
+
+The action runs the bundled **`bin/serve-hidden.vbs`** launcher via `wscript`,
+which starts `docent serve` with **no console window** and *waits* on it. That
+matters: a `cmd.exe`/`pwsh.exe` action would leave a console window open the
+whole time docent runs (and flash a fresh one on every watchdog-triggered
+restart). Because the launcher waits, the task instance stays "running", so the
+watchdog skips via `IgnoreNew` instead of stacking duplicates. The launcher
+derives the repo paths from its own location, passes `-Config` explicitly (the
+task's cwd is not the repo, so otherwise docent silently runs on defaults — no
+token, no links), and logs to `%TEMP%\docent.log`. Adjust `pwshPath` inside it
+if PowerShell 7 lives elsewhere.
+
+```powershell
+$me  = "$env:USERDOMAIN\$env:USERNAME"
+$vbs = 'C:\Users\me\Code\docent\bin\serve-hidden.vbs'
+$action = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ('"{0}"' -f $vbs)
+
+# At-logon start + a 1-min watchdog that repeats forever.
+$tLogon = New-ScheduledTaskTrigger -AtLogOn -User $me
+$tWatch = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 1)
+
+# Interactive + limited: docent moves/focuses windows, so it must run in your
+# logged-on session (NOT "whether logged on or not"). No time limit; skip a new
+# run while one is already going.
+$principal = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited
+$settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+    -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -StartWhenAvailable -Hidden
+
+Register-ScheduledTask -TaskName 'docent' -Action $action -Trigger @($tLogon, $tWatch) `
+    -Principal $principal -Settings $settings -Force
+Start-ScheduledTask -TaskName 'docent'
+Invoke-WebRequest http://127.0.0.1:39787/health -UseBasicParsing   # -> 200 ok
+```
+
+Manage it:
+
+```powershell
+Stop-ScheduledTask    -TaskName docent   # recycle: the watchdog relaunches a fresh process within ~1 min
+Disable-ScheduledTask -TaskName docent   # turn OFF autostart + watchdog
+Enable-ScheduledTask  -TaskName docent   # turn back on
+Unregister-ScheduledTask -TaskName docent -Confirm:$false   # remove entirely
+Get-ScheduledTask docent | Get-ScheduledTaskInfo            # last run time / result
+```
+
+Notes:
+
+- **Restart after a config/code change:** `Stop-ScheduledTask -TaskName docent`
+  — the watchdog brings up a fresh process (with the new config) within a
+  minute; use `Stop-…; Start-…` for an instant recycle.
+- Because the watchdog keeps docent alive, **don't stop it by killing the PID**
+  (it just respawns) — use `Stop-`/`Disable-ScheduledTask`.
+- Recovery only happens **while you're logged on** — by design, since docent
+  needs your interactive desktop to manage windows.
+- Recovery latency is up to ~1 min (the watchdog interval).
+
+**Windows (no admin) — Startup folder launcher (simpler, no auto-restart).**
+Drop a `docent.vbs` into your Startup folder (`Win+R` → `shell:startup`) that
+runs `serve` with **no console window** and logs to `%TEMP%\docent.log`. Unlike
+the task above, this does not restart docent if it crashes.
 
 ```vbs
 ' docent.vbs  -- starts docent serve at login, hidden, no admin.
@@ -174,15 +239,6 @@ To disable autostart: delete the `.vbs` from the Startup folder.
 > A plain Startup-folder **shortcut** to `pwsh -NoLogo -File <repo>\bin\docent.ps1 serve`
 > also works without admin, but flashes a console window at login; the `.vbs`
 > avoids that.
-
-**Windows (with admin) — Task Scheduler.** If you do have elevation and want it
-to survive logon more robustly:
-
-```powershell
-$action  = New-ScheduledTaskAction -Execute 'pwsh' -Argument "-NoLogo -File $PWD\bin\docent.ps1 serve"
-$trigger = New-ScheduledTaskTrigger -AtLogOn
-Register-ScheduledTask -TaskName 'docent' -Action $action -Trigger $trigger
-```
 
 **macOS** — a launchd LaunchAgent at `~/Library/LaunchAgents/com.docent.plist`:
 
@@ -330,6 +386,7 @@ switches Spaces.
 
 ```
 bin/docent.ps1            # CLI dispatcher (serve / open / focus / close / status)
+bin/serve-hidden.vbs      # Windows: launch `serve` hidden (no console) for the Scheduled Task
 src/Docent.psd1           # module manifest
 src/Docent.psm1           # loader (dot-sources Private + Public)
 src/Private/
