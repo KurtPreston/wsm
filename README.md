@@ -147,11 +147,15 @@ Set shell = CreateObject("WScript.Shell")
 q = Chr(34)
 pwshPath   = "C:\Program Files\PowerShell\7\pwsh.exe"
 scriptPath = "C:\Users\me\Code\docent\bin\docent.ps1"
+configPath = "C:\Users\me\Code\docent\docent.config.jsonc"
 logPath    = shell.ExpandEnvironmentStrings("%TEMP%\docent.log")
 
+' Pass -Config EXPLICITLY. The Startup folder is not the repo, so without it
+' config discovery falls back to ./docent.config.jsonc relative to the launch
+' cwd, finds nothing, and docent silently runs on defaults (no token, no links).
 ' Doubled outer quotes are the cmd /c idiom for a spaced exe path + redirection.
 cmd = "cmd /c " & q & q & pwshPath & q & " -NoLogo -NoProfile -File " & q & scriptPath & q & _
-      " serve >> " & q & logPath & q & " 2>&1" & q
+      " serve -Config " & q & configPath & q & " >> " & q & logPath & q & " 2>&1" & q
 shell.Run cmd, 0, False   ' 0 = hidden window, False = don't wait
 ```
 
