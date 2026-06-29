@@ -12,7 +12,8 @@
         'Open-DocentUrl',
         'Focus-DocentWorkspace',
         'Close-DocentWorkspace',
-        'Get-DocentStatus'
+        'Get-DocentStatus',
+        'Install-DocentHooks'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()

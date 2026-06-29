@@ -15,6 +15,7 @@ Usage:
   docent focus     [-Host <h>] [-Path <p>] [-Name <n>] [-Config <path>]
   docent close     [-Path <p>] [-Name <n>] [-Config <path>] [-RemoveDesktop]
   docent status    [-Config <path>]
+  docent install-hooks [-Host <h>] [-Config <path>]
   docent help
 
 Webhook contract (POST /open):
@@ -27,7 +28,7 @@ Environment:
 [CmdletBinding()]
 param(
     [Parameter(Mandatory, Position = 0)]
-    [ValidateSet('serve', 'open', 'open-url', 'focus', 'close', 'status', 'help')]
+    [ValidateSet('serve', 'open', 'open-url', 'focus', 'close', 'status', 'install-hooks', 'help')]
     [string]$Command,
 
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -93,6 +94,9 @@ switch ($Command) {
     }
     'status' {
         Get-DocentStatus @named
+    }
+    'install-hooks' {
+        Install-DocentHooks @named
     }
     'help' {
         Get-Help $PSCommandPath -Detailed
