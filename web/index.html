@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <title>docent</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font: 13px/1.5 ui-monospace, monospace; margin: 1rem; background: #14161a; color: #e6e6e6; }
+    h1 { font-size: 1rem; }
+    pre { white-space: pre-wrap; }
+  </style>
+</head>
+
+<body>
+  <h1>docent</h1>
+  <p>Live sessions (polling <code>/sessions</code>)&hellip;</p>
+  <pre id="out">loading&hellip;</pre>
+  <script>
+    async function refresh() {
+      try {
+        const r = await fetch('/sessions');
+        document.getElementById('out').textContent = JSON.stringify(await r.json(), null, 2);
+      } catch (e) {
+        document.getElementById('out').textContent = String(e);
+      }
+    }
+    refresh();
+    setInterval(refresh, 5000);
+  </script>
+</body>
+
+</html>

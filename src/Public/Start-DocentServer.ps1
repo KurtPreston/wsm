@@ -95,25 +95,10 @@ function Invoke-DocentRequest {
     }
 
     if ($method -eq 'POST' -and $path -eq '/open') {
-        if ($Token) {
-            $provided = Get-DocentBearerToken -Request $req
-            if (-not (Test-DocentTokenMatch -Expected $Token -Provided $provided)) {
-                Write-DocentWarn "Rejected $method $path from $($req.RemoteEndPoint): bad or missing token"
-                Send-DocentResponse -Context $Context -StatusCode 401 -Object @{ ok = $false; error = 'unauthorized' }
-                return
-            }
-        }
+        if (-not (Approve-DocentRequest -Request $req -Token $Token -Context $Context -Route "$method $path")) { return }
 
-        $body = Read-DocentRequestBody -Request $req
-        $payload = $null
-        try {
-            $payload = $body | ConvertFrom-Json
-        }
-        catch {
-            Write-DocentWarn "Bad JSON body: $($_.Exception.Message)"
-            Send-DocentResponse -Context $Context -StatusCode 400 -Object @{ ok = $false; error = 'invalid JSON body' }
-            return
-        }
+        $payload = Read-DocentJsonBody -Request $req -Context $Context
+        if ($null -eq $payload) { return }
 
         $h = if ($payload.PSObject.Properties.Name -contains 'host') { [string]$payload.host } else { $null }
         $p = if ($payload.PSObject.Properties.Name -contains 'path') { [string]$payload.path } else { $null }
@@ -142,7 +127,136 @@ function Invoke-DocentRequest {
         return
     }
 
+    # GET /sessions -- the grouped-by-ticket dashboard payload. Localhost-only,
+    # like the dashboard it feeds; left unauthenticated so the browser can poll.
+    if ($method -eq 'GET' -and $path -eq '/sessions') {
+        try {
+            $data = Get-DocentDashboard -Config $Config
+            Send-DocentResponse -Context $Context -StatusCode 200 -Object $data
+        }
+        catch {
+            Write-DocentError "sessions failed: $($_.Exception.Message)"
+            Send-DocentResponse -Context $Context -StatusCode 500 -Object @{ ok = $false; error = $_.Exception.Message }
+        }
+        return
+    }
+
+    # POST /focus -- bring a session's window to the foreground by name.
+    if ($method -eq 'POST' -and $path -eq '/focus') {
+        $payload = Read-DocentJsonBody -Request $req -Context $Context
+        if ($null -eq $payload) { return }
+        $n = if ($payload.PSObject.Properties.Name -contains 'name') { [string]$payload.name } else { $null }
+        if (-not $n) {
+            Send-DocentResponse -Context $Context -StatusCode 400 -Object @{ ok = $false; error = 'body must include {name}' }
+            return
+        }
+        try {
+            $result = Focus-DocentWorkspace -Name $n -ConfigObject $Config
+            if ($result.Action -eq 'none') {
+                Send-DocentResponse -Context $Context -StatusCode 404 -Object @{ ok = $false; action = 'none'; name = $n }
+            }
+            else {
+                Send-DocentResponse -Context $Context -StatusCode 200 -Object @{ ok = $true; action = $result.Action; name = $result.Name }
+            }
+        }
+        catch {
+            Write-DocentError "focus failed: $($_.Exception.Message)"
+            Send-DocentResponse -Context $Context -StatusCode 500 -Object @{ ok = $false; error = $_.Exception.Message }
+        }
+        return
+    }
+
+    # GET / and /dashboard (+ static assets) -- serve the web dashboard.
+    if ($method -eq 'GET') {
+        $rel = if ($path -eq '/' -or $path -eq '/dashboard' -or $path -eq '/dashboard/') { 'index.html' } else { $path.TrimStart('/') }
+        if (Send-DocentStaticFile -Context $Context -RelativePath $rel) { return }
+    }
+
     Send-DocentResponse -Context $Context -StatusCode 404 -Object @{ ok = $false; error = 'not found' }
+}
+
+# Enforce the shared-secret token (when configured) for a request. Returns
+# $true to proceed, or sends a 401 and returns $false.
+function Approve-DocentRequest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][System.Net.HttpListenerRequest]$Request,
+        [AllowNull()][AllowEmptyString()][string]$Token,
+        [Parameter(Mandatory)][System.Net.HttpListenerContext]$Context,
+        [string]$Route
+    )
+    if (-not $Token) { return $true }
+    $provided = Get-DocentBearerToken -Request $Request
+    if (Test-DocentTokenMatch -Expected $Token -Provided $provided) { return $true }
+    Write-DocentWarn "Rejected $Route from $($Request.RemoteEndPoint): bad or missing token"
+    Send-DocentResponse -Context $Context -StatusCode 401 -Object @{ ok = $false; error = 'unauthorized' }
+    return $false
+}
+
+# Read + parse a JSON request body. On bad JSON, sends a 400 and returns $null.
+function Read-DocentJsonBody {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][System.Net.HttpListenerRequest]$Request,
+        [Parameter(Mandatory)][System.Net.HttpListenerContext]$Context
+    )
+    $body = Read-DocentRequestBody -Request $Request
+    try { return ($body | ConvertFrom-Json) }
+    catch {
+        Write-DocentWarn "Bad JSON body: $($_.Exception.Message)"
+        Send-DocentResponse -Context $Context -StatusCode 400 -Object @{ ok = $false; error = 'invalid JSON body' }
+        return $null
+    }
+}
+
+# Serve a file from the bundled web/ directory. Returns $true when served (any
+# status), $false when the file is outside web/ or absent (so the caller 404s).
+function Send-DocentStaticFile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][System.Net.HttpListenerContext]$Context,
+        [Parameter(Mandatory)][string]$RelativePath
+    )
+    $webRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '../../web') -ErrorAction SilentlyContinue)
+    if (-not $webRoot) { return $false }
+    $webRoot = $webRoot.Path
+
+    # Resolve and contain the request within web/ (block path traversal).
+    $candidate = [System.IO.Path]::GetFullPath((Join-Path $webRoot $RelativePath))
+    $rootWithSep = [System.IO.Path]::GetFullPath($webRoot).TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    if (-not ($candidate + [System.IO.Path]::DirectorySeparatorChar).StartsWith($rootWithSep, [System.StringComparison]::OrdinalIgnoreCase) -and
+        -not $candidate.StartsWith($rootWithSep, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $false
+    }
+    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { return $false }
+
+    $bytes = [System.IO.File]::ReadAllBytes($candidate)
+    $resp = $Context.Response
+    $resp.ContentType = Get-DocentContentType -Path $candidate
+    $resp.StatusCode = 200
+    $resp.ContentLength64 = $bytes.Length
+    try { $resp.OutputStream.Write($bytes, 0, $bytes.Length) }
+    finally { $resp.OutputStream.Close() }
+    return $true
+}
+
+# Minimal extension -> content-type map for the static dashboard assets.
+function Get-DocentContentType {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+    switch ([System.IO.Path]::GetExtension($Path).ToLowerInvariant()) {
+        '.html' { 'text/html; charset=utf-8' }
+        '.htm' { 'text/html; charset=utf-8' }
+        '.css' { 'text/css; charset=utf-8' }
+        '.js' { 'text/javascript; charset=utf-8' }
+        '.mjs' { 'text/javascript; charset=utf-8' }
+        '.json' { 'application/json; charset=utf-8' }
+        '.svg' { 'image/svg+xml' }
+        '.png' { 'image/png' }
+        '.ico' { 'image/x-icon' }
+        '.woff2' { 'font/woff2' }
+        default { 'application/octet-stream' }
+    }
 }
 
 # Extract the token from an `Authorization: Bearer <token>` header, or $null.
