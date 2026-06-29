@@ -65,10 +65,22 @@ function Test-DocentWorkspaceWindow {
     # '[' and ']' which are wildcard metacharacters under -like.
     if ($RemoteHost) {
         # "<leaf> [SSH: <host>]" anchored on the leaf (and its trailing space).
+        # Handles both the bare and file-open remote titles.
         if ($Title.Contains("$LeafName [SSH: $RemoteHost]")) { return $true }
     }
-    # Transient title before the remote/file markers render.
+    # Transient title right after launch, before the [SSH:]/file markers render.
+    # Matched regardless of $RemoteHost so a freshly-launched remote window is
+    # adopted in the brief window before its SSH marker appears.
     if ($Title -eq "$LeafName - Cursor") { return $true }
+
+    # Local window (no remote requested): parse the title's workspace leaf so
+    # file-open titles like "<file> - <leaf> - Cursor" (and Cursor's own
+    # "<leaf> - <leaf> - Cursor") still match -- but only for non-SSH windows,
+    # so a local focus never grabs a remote window that happens to share a leaf.
+    if (-not $RemoteHost) {
+        $parsed = ConvertFrom-DocentCursorTitle -Title $Title
+        if ($parsed.Leaf -eq $LeafName -and [string]::IsNullOrEmpty($parsed.Host)) { return $true }
+    }
     return $false
 }
 

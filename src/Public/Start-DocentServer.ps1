@@ -184,12 +184,14 @@ function Invoke-DocentRequest {
         $payload = Read-DocentJsonBody -Request $req -Context $Context
         if ($null -eq $payload) { return }
         $n = if ($payload.PSObject.Properties.Name -contains 'name') { [string]$payload.name } else { $null }
+        $fhost = if ($payload.PSObject.Properties.Name -contains 'host') { [string]$payload.host } else { $null }
         if (-not $n) {
             Send-DocentResponse -Context $Context -StatusCode 400 -Object @{ ok = $false; error = 'body must include {name}' }
             return
         }
         try {
-            $result = Focus-DocentWorkspace -Name $n -ConfigObject $Config
+            $result = if ($fhost) { Focus-DocentWorkspace -Name $n -Host $fhost -ConfigObject $Config }
+            else { Focus-DocentWorkspace -Name $n -ConfigObject $Config }
             if ($result.Action -eq 'none') {
                 Send-DocentResponse -Context $Context -StatusCode 404 -Object @{ ok = $false; action = 'none'; name = $n }
             }

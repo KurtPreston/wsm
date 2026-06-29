@@ -36,12 +36,12 @@ function timeAgo(iso) {
   return Math.floor(s / 86400) + "d ago";
 }
 
-async function focusSession(name) {
+async function focusSession(name, host) {
   try {
     const r = await fetch("/focus", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, host: host || null }),
     });
     const d = await r.json().catch(() => ({}));
     if (r.ok && d.ok) toast("focused " + name);
@@ -58,7 +58,7 @@ function renderSessionRow(s) {
   const row = el(clickable ? "div" : "div", "row session" + (clickable ? " clickable" : ""));
   if (clickable) {
     row.title = "Focus this window";
-    row.addEventListener("click", () => focusSession(s.name));
+    row.addEventListener("click", () => focusSession(s.name, s.host));
   }
 
   row.appendChild(el("span", "live" + (s.live ? " on" : "")));
