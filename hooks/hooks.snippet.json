@@ -1,0 +1,18 @@
+{
+  "_comment": "Reference only. `docent install-hooks` MERGES these entries into the remote ~/.cursor/hooks.json (appending to any existing arrays, preserving other hooks). It does not copy this file verbatim. Commands are relative to ~/.cursor/ (the user-hook working directory). The trailing argument is the docent event kind, so one script serves every event.",
+  "version": 1,
+  "hooks": {
+    "stop": [
+      { "command": "./hooks/docent-notify.sh agent-stop", "timeout": 5 }
+    ],
+    "sessionStart": [
+      { "command": "./hooks/docent-notify.sh session-start", "timeout": 5 }
+    ],
+    "sessionEnd": [
+      { "command": "./hooks/docent-notify.sh session-end", "timeout": 5 }
+    ],
+    "afterShellExecution": [
+      { "command": "./hooks/docent-notify.sh shell-done", "timeout": 5 }
+    ]
+  }
+}
