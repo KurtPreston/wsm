@@ -18,6 +18,7 @@ Usage:
   docent install-hooks [-Host <h>] [-Config <path>]
   docent doctor    [-Config <path>]
   docent init      [-Config <path>]
+  docent launcher  [-Hotkey <spec>] [-Config <path>]   (Windows; macOS uses Hammerspoon)
   docent help
 
 Webhook contract (POST /open):
@@ -30,7 +31,7 @@ Environment:
 [CmdletBinding()]
 param(
     [Parameter(Mandatory, Position = 0)]
-    [ValidateSet('serve', 'open', 'open-url', 'focus', 'close', 'status', 'install-hooks', 'doctor', 'init', 'help')]
+    [ValidateSet('serve', 'open', 'open-url', 'focus', 'close', 'status', 'install-hooks', 'doctor', 'init', 'launcher', 'help')]
     [string]$Command,
 
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -106,6 +107,17 @@ switch ($Command) {
     }
     'init' {
         $null = Initialize-Docent @named
+    }
+    'launcher' {
+        if ($IsWindows) {
+            $launcher = Join-Path $PSScriptRoot '../launcher/docent-launcher.ps1'
+            & $launcher @named
+        }
+        else {
+            $lua = (Resolve-Path (Join-Path $PSScriptRoot '../launcher/docent.lua') -ErrorAction SilentlyContinue)
+            Write-Host "On macOS the launcher runs under Hammerspoon."
+            Write-Host "Copy $($lua.Path) next to ~/.hammerspoon/init.lua and add: require(`"docent`")"
+        }
     }
     'help' {
         Get-Help $PSCommandPath -Detailed
