@@ -5,3 +5,4 @@ docent.config.jsonc
 # PowerShell / editor noise
 *.log
 .vscode/
+.cursor/
