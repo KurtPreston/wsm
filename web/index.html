@@ -5,29 +5,29 @@
   <meta charset="utf-8" />
   <title>docent</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style>
-    body { font: 13px/1.5 ui-monospace, monospace; margin: 1rem; background: #14161a; color: #e6e6e6; }
-    h1 { font-size: 1rem; }
-    pre { white-space: pre-wrap; }
-  </style>
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='6' fill='%237aa2f7'/></svg>" />
+  <link rel="stylesheet" href="/dashboard.css" />
 </head>
 
 <body>
-  <h1>docent</h1>
-  <p>Live sessions (polling <code>/sessions</code>)&hellip;</p>
-  <pre id="out">loading&hellip;</pre>
-  <script>
-    async function refresh() {
-      try {
-        const r = await fetch('/sessions');
-        document.getElementById('out').textContent = JSON.stringify(await r.json(), null, 2);
-      } catch (e) {
-        document.getElementById('out').textContent = String(e);
-      }
-    }
-    refresh();
-    setInterval(refresh, 5000);
-  </script>
+  <header class="topbar">
+    <div class="brand">
+      <span class="dot"></span>
+      <h1>docent</h1>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div class="controls">
+      <label class="toggle"><input type="checkbox" id="auto" checked /> auto</label>
+      <button id="refresh" title="Refresh now">↻</button>
+    </div>
+  </header>
+
+  <main id="board" class="board" aria-live="polite"></main>
+
+  <div id="toast" class="toast" role="status"></div>
+
+  <script src="/dashboard.js"></script>
 </body>
 
 </html>
