@@ -60,5 +60,55 @@
   // leaf, retry with a short delay.
   "launchTimeoutSec": 25,
   "launchRetries": 2,
-  "launchDelaySec": 2
+  "launchDelaySec": 2,
+
+  // ===========================================================================
+  // Session dashboard (docent serve also exposes /sessions + a web dashboard).
+  // ===========================================================================
+
+  // Global default for turning a worktree/branch/PR name into a ticket key. The
+  // first capture group is used and upper-cased (e.g. "salsa-12345-foo" ->
+  // "SALSA-12345"). A source below may override this with its own
+  // "ticketPattern". (The `\\d` is JSON-escaped; the loader preserves it.)
+  "ticketPattern": "^([a-z]+-\\d+)",
+
+  // How long (seconds) the JIRA/GitHub feeds are cached before GET /sessions
+  // refreshes them. Live Cursor-window enumeration is always real-time.
+  "refreshSec": 60,
+
+  // Typed, repeatable data sources merged (with live Cursor sessions) into the
+  // dashboard's ticket groups. Each entry has a "type" and an optional "label"
+  // (shown in the UI / doctor) and "id". Remove or add freely.
+  "sources": [
+    // JIRA: your in-progress tickets become ticket-group headers. Auth is a
+    // Personal Access Token (Server/Data Center) sent as a Bearer header, read
+    // from the env var named by "tokenEnv" (default "DOCENT_JIRA_TOKEN").
+    {
+      "type": "jira",
+      "label": "salsa",
+      "baseUrl": "https://jira.drwholdings.com",
+      "jql": "assignee = currentUser() AND status = \"In Progress\"",
+      "tokenEnv": "DOCENT_JIRA_TOKEN"
+    },
+
+    // GitHub: your open PRs become child rows under their ticket group. Uses the
+    // `gh` CLI (must be authenticated: `gh auth login --hostname <host>`). The
+    // host is exported as GH_HOST for `gh search`. "filter" is one of
+    // author|assignee|involves (default "author").
+    {
+      "type": "github",
+      "label": "drw",
+      "host": "git.drwholdings.com",
+      "filter": "author"
+    },
+
+    // remoteHost: an SSH alias (from ~/.ssh/config) that runs remote Cursor
+    // worktrees behind the reverse tunnel. `docent install-hooks` pushes the
+    // Cursor hook here over SSH; `docent doctor` checks ssh + the reverse path.
+    {
+      "type": "remoteHost",
+      "label": "devbox",
+      "host": "desktop"
+    }
+  ]
 }

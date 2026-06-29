@@ -100,6 +100,20 @@ function Get-DocentConfig {
         launchTimeoutSec = 25
         launchRetries    = 2
         launchDelaySec   = 2
+        # --- session dashboard ---
+        # Global default for deriving a ticket key from a worktree/branch/PR name.
+        # The first capture group is the key; it is upper-cased (SALSA-12345).
+        # A `jira`/`github`/`remoteHost` source may override via its own
+        # `ticketPattern`.
+        ticketPattern    = '^([a-z]+-\d+)'
+        # TTL (seconds) for the JIRA/GitHub feed cache consulted by GET /sessions.
+        refreshSec       = 60
+        # Typed, repeatable data sources for the dashboard. Each entry is one of:
+        #   { "type": "jira",       "label": "...", "baseUrl": "...", "jql": "...", "tokenEnv": "DOCENT_JIRA_TOKEN" }
+        #   { "type": "github",     "label": "...", "host": "git.example.com", "filter": "author|assignee|involves" }
+        #   { "type": "remoteHost", "label": "...", "host": "<ssh alias>" }
+        # Local live-session enumeration is implicit/always-on (not a source).
+        sources          = @()
     }
 
     $cfg = [ordered]@{}
@@ -168,6 +182,51 @@ function Resolve-DocentLinks {
         $urls += $url
     }
     return $urls
+}
+
+# Return the configured `sources` array (optionally filtered by type), as a flat
+# array. Tolerates a missing/empty `sources` key. StrictMode-safe.
+function Get-DocentSources {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][PSCustomObject]$Config,
+        [ValidateSet('jira', 'github', 'remoteHost')][string]$Type
+    )
+
+    if (-not ($Config.PSObject.Properties.Name -contains 'sources') -or -not $Config.sources) { return @() }
+    $all = @($Config.sources)
+    if (-not $Type) { return $all }
+    return @($all | Where-Object {
+            ($_.PSObject.Properties.Name -contains 'type') -and ([string]$_.type -eq $Type)
+        })
+}
+
+# Derive an upper-cased ticket key (e.g. "SALSA-12345") from an arbitrary name
+# (worktree leaf, branch, PR title, or branch). Uses $PatternOverride when given,
+# otherwise the global $Config.ticketPattern, otherwise the built-in default. The
+# first capture group is the key; returns $null when nothing matches.
+function Resolve-DocentTicketKey {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][AllowEmptyString()][string]$Name,
+        [PSCustomObject]$Config,
+        [string]$PatternOverride
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Name)) { return $null }
+
+    $pattern = $null
+    if ($PatternOverride) { $pattern = $PatternOverride }
+    elseif ($Config -and ($Config.PSObject.Properties.Name -contains 'ticketPattern') -and $Config.ticketPattern) {
+        $pattern = [string]$Config.ticketPattern
+    }
+    else { $pattern = '^([a-z]+-\d+)' }
+
+    $m = [regex]::Match($Name, $pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if (-not $m.Success) { return $null }
+    $key = if ($m.Groups.Count -gt 1) { $m.Groups[1].Value } else { $m.Groups[0].Value }
+    if ([string]::IsNullOrWhiteSpace($key)) { return $null }
+    return $key.ToUpperInvariant()
 }
 
 # Replace {key} tokens in a template from a context hashtable. Unknown tokens
