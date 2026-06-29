@@ -127,6 +127,44 @@ function Invoke-DocentRequest {
         return
     }
 
+    # POST /event -- a Cursor hook reports session activity (and, on session
+    # start, the exact title-bar color). Token-authenticated like /open.
+    if ($method -eq 'POST' -and $path -eq '/event') {
+        if (-not (Approve-DocentRequest -Request $req -Token $Token -Context $Context -Route "$method $path")) { return }
+
+        $payload = Read-DocentJsonBody -Request $req -Context $Context
+        if ($null -eq $payload) { return }
+
+        $props = $payload.PSObject.Properties.Name
+        $name = if ($props -contains 'name') { [string]$payload.name } else { $null }
+        $epath = if ($props -contains 'path') { [string]$payload.path } else { $null }
+        $kind = if ($props -contains 'kind') { [string]$payload.kind } else { $null }
+        $color = if ($props -contains 'color') { [string]$payload.color } else { $null }
+        $convId = if ($props -contains 'conversationId') { [string]$payload.conversationId } else { $null }
+        $ehost = if ($props -contains 'host') { [string]$payload.host } else { $null }
+
+        if (-not $name -and $epath) { $name = Get-DocentLeafName -Path $epath }
+        if (-not $name) {
+            Send-DocentResponse -Context $Context -StatusCode 400 -Object @{ ok = $false; error = 'event must include name or path' }
+            return
+        }
+        $validKinds = @('agent-stop', 'session-start', 'session-end', 'shell-done')
+        if (-not $kind -or ($validKinds -notcontains $kind)) {
+            Send-DocentResponse -Context $Context -StatusCode 400 -Object @{ ok = $false; error = "kind must be one of: $($validKinds -join ', ')" }
+            return
+        }
+
+        try {
+            Set-DocentSessionEvent -Config $Config -Name $name -Kind $kind -Host $ehost -Path $epath -Color $color -ConversationId $convId
+            Send-DocentResponse -Context $Context -StatusCode 200 -Object @{ ok = $true; name = $name; kind = $kind }
+        }
+        catch {
+            Write-DocentError "event failed: $($_.Exception.Message)"
+            Send-DocentResponse -Context $Context -StatusCode 500 -Object @{ ok = $false; error = $_.Exception.Message }
+        }
+        return
+    }
+
     # GET /sessions -- the grouped-by-ticket dashboard payload. Localhost-only,
     # like the dashboard it feeds; left unauthenticated so the browser can poll.
     if ($method -eq 'GET' -and $path -eq '/sessions') {
