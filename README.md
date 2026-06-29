@@ -3,11 +3,11 @@
 **docent** is a small, cross-platform (Windows + macOS) local daemon that listens
 for webhooks and brings the right remote Cursor workspace into focus on **this**
 machine. It is the *receiver* half of a loosely-coupled pair: the *sender* is
-[grove](https://github.com/KurtPreston/grove) (command `wt`) running on a remote
+[grove](https://github.com/KurtPreston/grove) (command `grove`) running on a remote
 dev box. The only contract between them is a webhook body — `{host, path, name}`.
 
 ```
- dev box (grove / wt)                         workstation (docent)
+ dev box (grove)                              workstation (docent)
  ────────────────────                         ──────────────────────
  POST /open  ───────► 127.0.0.1:39787 ──┐
  {host,path,name}                        │  reverse SSH tunnel

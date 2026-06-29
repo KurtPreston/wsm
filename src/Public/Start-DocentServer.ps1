@@ -12,7 +12,7 @@ never a public interface). Routes:
   POST /open    -> parse JSON {host, path, name}, run the open-or-focus handler,
                    return 200 + a small JSON result (4xx bad body, 5xx failure).
 
-The dev box (running grove / `wt`) POSTs to 127.0.0.1:<port>/open, reaching this
+The dev box (running grove) POSTs to 127.0.0.1:<port>/open, reaching this
 machine through a reverse SSH tunnel (RemoteForward). All logs go to stderr;
 honor DOCENT_LOG_LEVEL.
 
