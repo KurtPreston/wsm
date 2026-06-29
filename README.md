@@ -21,6 +21,10 @@ dev box. The only contract between them is a webhook body — `{host, path, name
 
 Cursor + Windows virtual desktops are just the first backend, not the core idea.
 
+`docent serve` also hosts a **mission-control dashboard** — a color-coded,
+grouped-by-ticket view of your live Cursor sessions, JIRA tickets, and GitHub PRs,
+plus a Spotlight-style hotkey launcher. See [Session dashboard](#session-dashboard).
+
 ## How it works
 
 grove POSTs JSON to `http://127.0.0.1:<port>/open` (default port **39787**),
@@ -288,6 +292,20 @@ pwsh ./bin/docent.ps1 close -Name my-feature -RemoveDesktop
 
 # Show what docent can see (windows; desktops on Windows).
 pwsh ./bin/docent.ps1 status
+
+# --- session dashboard (see "Session dashboard" below) ---
+
+# Scaffold a sources config, then run doctor and report gaps.
+pwsh ./bin/docent.ps1 init
+
+# Validate the environment + every configured source (PASS / FAIL / SKIP).
+pwsh ./bin/docent.ps1 doctor
+
+# Push the Cursor hook to each remoteHost source (or just one) over SSH.
+pwsh ./bin/docent.ps1 install-hooks [-Host desktop]
+
+# Spotlight-style hotkey picker (Windows; macOS uses Hammerspoon — see below).
+pwsh ./bin/docent.ps1 launcher [-Hotkey "Ctrl+Alt+Space"]
 ```
 
 Or import the module and call the cmdlets directly:
@@ -319,6 +337,9 @@ field. Discovery order (first hit wins): `-Config <path>`, `$DOCENT_CONFIG`,
 | `browserExe` | auto | explicit browser launcher for links (Chrome/Edge/Brave on Win) |
 | `browserProcessName` | auto | process name used to match browser windows (Win) |
 | `launchTimeoutSec` / `launchRetries` / `launchDelaySec` | `25` / `2` / `2` | Windows folder-uri hang mitigations |
+| `ticketPattern` | `^([a-z]+-\d+)` | regex → ticket key (first group, upper-cased) for grouping (see [Session dashboard](#session-dashboard)) |
+| `refreshSec` | `60` | TTL for the JIRA/GitHub feeds behind `GET /sessions` |
+| `sources` | `[]` | typed `jira` / `github` / `remoteHost` data sources for the dashboard |
 
 The JSONC loader strips `//` and `/* */` comments and trailing commas while
 **preserving string literals**, so `vscode-remote://…` inside `uri` is never
@@ -364,6 +385,114 @@ Notes:
 - **macOS** is window-only (no Spaces): the URL simply opens in a new browser
   window with no desktop placement.
 
+## Session dashboard
+
+Beyond open-or-focus, `docent serve` doubles as a **mission-control dashboard**:
+a single color-coded view of your live Cursor sessions, your in-progress JIRA
+tickets, and your open GitHub PRs — **grouped by ticket** — with a Spotlight-style
+launcher to jump to any of them. Everything is served from the same localhost
+listener; no extra daemon.
+
+Open it at **http://127.0.0.1:39787/** (or `/dashboard`).
+
+### Row model
+
+Each row is one of three kinds, merged into **ticket groups** (the ticket key is
+derived from a worktree/branch/PR name via `ticketPattern`):
+
+- **session** — a live Cursor window (remote or local). Reconciled on every read
+  from window enumeration, so liveness is always real-time. Clicking a live
+  session focuses its window (`POST /focus`).
+- **ticket** — an in-progress JIRA issue (from a `jira` source). Becomes the
+  group header (key + summary + status); links to the issue.
+- **pr** — an open GitHub PR (from a `github` source), shown under its ticket.
+
+A session that finished a turn (or a long shell command) without you returning to
+it is flagged **needs follow-up**; that badge bubbles up to its ticket group, and
+**focusing the session clears it**. Groups needing follow-up sort first.
+
+### Colors
+
+Group/session swatches use a two-tier scheme:
+
+1. **Exact (`hook`)** — when a Cursor `sessionStart` hook reports the worktree's
+   `titleBar.activeBackground` from `.vscode/settings.json`, the swatch matches
+   Cursor's actual title bar exactly.
+2. **Derived (`derived`)** — otherwise docent computes a deterministic color from
+   the session name. This is a faithful port of
+   [grove](https://github.com/KurtPreston/grove)'s `ForBranch` (POSIX `cksum` →
+   OKLCH hue → sRGB), so the same name yields the same hue grove would use.
+
+### Sources
+
+Add a typed `sources` array to your config. Run **`docent init`** to scaffold one
+from your detected environment (SSH hosts, authenticated `gh` hosts, a JIRA
+token), then **`docent doctor`** to validate it:
+
+```jsonc
+"sources": [
+  // Your in-progress tickets become group headers. Auth = a JIRA Personal
+  // Access Token sent as a Bearer header, read from the env var in `tokenEnv`.
+  { "type": "jira", "label": "salsa", "baseUrl": "https://jira.example.com",
+    "jql": "assignee = currentUser() AND status = \"In Progress\"",
+    "tokenEnv": "DOCENT_JIRA_TOKEN" },
+
+  // Your open PRs, via the `gh` CLI (gh auth login --hostname <host>). The host
+  // is exported as GH_HOST for `gh search`. filter = author|assignee|involves.
+  { "type": "github", "label": "drw", "host": "git.example.com", "filter": "author" },
+
+  // An SSH alias whose dev box runs remote Cursor worktrees. `install-hooks`
+  // pushes the Cursor hook here; `doctor` checks ssh + the reverse tunnel.
+  { "type": "remoteHost", "label": "devbox", "host": "desktop" }
+]
+```
+
+Live Cursor enumeration is always on (not a source). JIRA/GitHub results are
+TTL-cached for `refreshSec`. Each feed degrades independently — a failing source
+logs a warning and contributes nothing rather than breaking the dashboard.
+
+### Endpoints
+
+| Method + path | Auth | Purpose |
+| --- | --- | --- |
+| `GET /health` | none | liveness probe |
+| `POST /open` | token | open-or-focus a workspace (the original webhook) |
+| `POST /event` | token | a Cursor hook reports session activity (+ exact color) |
+| `GET /sessions` | none¹ | the grouped-by-ticket dashboard payload (JSON) |
+| `POST /focus` | none¹ | focus a session window by `{name}` |
+| `GET /` , `/dashboard`, static assets | none¹ | the web dashboard |
+
+¹ Localhost-only, served to the local browser; left unauthenticated so the page
+can poll without a token. `POST /event` is token-authenticated like `/open`.
+
+### Dev-box hook
+
+`docent install-hooks` SSHes to each `remoteHost` (the same workstation→dev-box
+direction that already carries the reverse tunnel) and **idempotently**:
+
+1. copies `hooks/docent-notify.sh` to `~/.cursor/hooks/`,
+2. drops a mode-600 `~/.cursor/docent-token` (the shared secret the hook sends),
+3. **merges** docent's entries into `~/.cursor/hooks.json` for `stop`,
+   `sessionStart`, `sessionEnd`, and `afterShellExecution` — **preserving every
+   other hook** you already have.
+
+The hook fires on those events, reads the worktree from `workspace_roots`, and
+POSTs `{name, kind, host, path, color?}` to `127.0.0.1:39787/event` through the
+reverse tunnel. It is fire-and-forget (short timeout, always exits 0), so a down
+docent never blocks Cursor. Re-running `install-hooks` replaces docent's entries
+without duplicating them.
+
+### Launcher
+
+A Spotlight-style picker bound to a global hotkey lists your sessions / tickets /
+PRs; type to fuzzy-filter, Enter to focus the session or open the URL, Esc to
+dismiss.
+
+- **Windows** — `docent launcher` runs a frameless WPF window with a global
+  `RegisterHotKey` (default **Ctrl+Alt+Space**). No extra runtime, no admin.
+- **macOS** — `launcher/docent.lua` is a Hammerspoon `chooser`. Copy it next to
+  `~/.hammerspoon/init.lua` and add `require("docent")` (default **Cmd+Alt+Space**).
+
 ## OS backends
 
 docent selects a backend at runtime (`$IsWindows` / `$IsMacOS`). Both implement
@@ -385,13 +514,15 @@ switches Spaces.
 ## Layout
 
 ```
-bin/docent.ps1            # CLI dispatcher (serve / open / focus / close / status)
+bin/docent.ps1            # CLI dispatcher (serve / open / focus / close / status / init / doctor / install-hooks / launcher)
 bin/serve-hidden.vbs      # Windows: launch `serve` hidden (no console) for the Scheduled Task
 src/Docent.psd1           # module manifest
 src/Docent.psm1           # loader (dot-sources Private + Public)
 src/Private/
   Logging.ps1             # stderr logging (DOCENT_LOG_LEVEL)
-  Config.ps1              # JSONC loader + templating
+  Config.ps1              # JSONC loader + templating + sources/ticket helpers
+  Registry.ps1            # session registry (JSON state, grove color port, follow-up)
+  Feeds.ps1               # row builder: live sessions + JIRA + GitHub, grouped by ticket
   Backend.ps1             # runtime OS-backend dispatch
   Backend.macos.ps1       # macOS window control via cursor CLI + osascript
   Desktop.ps1             # Windows virtual-desktop wrappers (VirtualDesktop)
@@ -399,10 +530,21 @@ src/Private/
   Browser.ps1             # Windows browser launch + window matching (companion links)
   Native.ps1              # Windows Win32 interop (window enumeration/focus)
 src/Public/
-  Start-DocentServer.ps1  # HttpListener webhook receiver (serve)
+  Start-DocentServer.ps1  # HttpListener: /open /event /sessions /focus + static dashboard
   Open-DocentWorkspace.ps1
   Open-DocentUrl.ps1      # open a companion URL on a named desktop
   Focus-DocentWorkspace.ps1
   Close-DocentWorkspace.ps1
   Get-DocentStatus.ps1
+  Install-DocentHooks.ps1 # SSH-push the Cursor hook to remoteHost sources
+  Invoke-DocentDoctor.ps1 # per-source PASS/FAIL/SKIP validation
+  Initialize-Docent.ps1   # `init`: scaffold sources config + run doctor
+web/                      # the dashboard (index.html + dashboard.css + dashboard.js)
+hooks/
+  docent-notify.sh        # Cursor hook -> POST /event (installed on the dev box)
+  docent-verify.sh        # throwaway diagnostic hook
+  hooks.snippet.json      # reference of the merged hooks.json entries
+launcher/
+  docent-launcher.ps1     # Windows WPF Spotlight-style picker (global hotkey)
+  docent.lua              # macOS Hammerspoon chooser
 ```
