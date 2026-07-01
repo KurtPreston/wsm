@@ -1,15 +1,12 @@
 Set-StrictMode -Version Latest
 
-# Win32 interop for enumerating top-level windows (Windows backend only). We
-# need full window enumeration (not just Process.MainWindowHandle) because
-# Electron apps like Cursor host multiple windows under a single process, and
-# the freshly-opened remote window may not be the "main" one.
-#
-# This file is dot-sourced on every platform but Initialize-DocentNative is only
-# ever called from the Windows backend.
+# Win32 interop for enumerating top-level windows. We need full window
+# enumeration (not just Process.MainWindowHandle) because Electron apps like
+# Cursor host multiple windows under a single process, and the freshly-opened
+# remote window may not be the "main" one.
 
-function Initialize-DocentNative {
-    if (([System.Management.Automation.PSTypeName]'Docent.NativeMethods').Type) { return }
+function Initialize-WsmNative {
+    if (([System.Management.Automation.PSTypeName]'Wsm.NativeMethods').Type) { return }
 
     $signature = @'
 using System;
@@ -17,7 +14,7 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace Docent {
+namespace Wsm {
     public class WinInfo {
         public IntPtr Hwnd;
         public uint Pid;
@@ -82,9 +79,9 @@ namespace Docent {
 }
 
 # Returns visible top-level windows as PSCustomObjects: Hwnd, Pid, Title.
-function Get-DocentAllWindows {
-    Initialize-DocentNative
-    foreach ($w in [Docent.NativeMethods]::GetWindows()) {
+function Get-WsmAllWindows {
+    Initialize-WsmNative
+    foreach ($w in [Wsm.NativeMethods]::GetWindows()) {
         [PSCustomObject]@{
             Hwnd  = $w.Hwnd
             Pid   = [int]$w.Pid
@@ -93,15 +90,15 @@ function Get-DocentAllWindows {
     }
 }
 
-function Set-DocentForegroundWindow {
+function Set-WsmForegroundWindow {
     param([Parameter(Mandatory)][IntPtr]$Hwnd)
-    Initialize-DocentNative
-    [void][Docent.NativeMethods]::ShowWindow($Hwnd, [Docent.NativeMethods]::SW_RESTORE)
-    [void][Docent.NativeMethods]::SetForegroundWindow($Hwnd)
+    Initialize-WsmNative
+    [void][Wsm.NativeMethods]::ShowWindow($Hwnd, [Wsm.NativeMethods]::SW_RESTORE)
+    [void][Wsm.NativeMethods]::SetForegroundWindow($Hwnd)
 }
 
-function Close-DocentWindowHandle {
+function Close-WsmWindowHandle {
     param([Parameter(Mandatory)][IntPtr]$Hwnd)
-    Initialize-DocentNative
-    [void][Docent.NativeMethods]::PostMessage($Hwnd, [Docent.NativeMethods]::WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
+    Initialize-WsmNative
+    [void][Wsm.NativeMethods]::PostMessage($Hwnd, [Wsm.NativeMethods]::WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
 }
