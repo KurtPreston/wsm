@@ -1,6 +1,15 @@
-# Local config (may contain host-specific paths)
+# Local config (may contain host-specific paths / secrets)
+wsm.config.json
+wsm.config.jsonc
 docent.config.json
 docent.config.jsonc
+
+# Go build output
+/bin/wsm-macos
+/bin/wsm-windows
+*.test
+*.out
+coverage.*
 
 # PowerShell / editor noise
 *.log
