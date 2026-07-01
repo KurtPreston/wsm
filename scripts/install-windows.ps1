@@ -9,6 +9,10 @@
   (required so it can move/focus windows). A repeating trigger relaunches it if
   it dies; MultipleInstances=IgnoreNew avoids duplicates.
 
+  The binary is built for the GUI subsystem (-H windowsgui) so it runs headless
+  with no console window; because that discards stderr, the task passes -log so
+  the daemon writes to <BinDir>\wsmd.log instead.
+
   Requires: Go 1.22+, PowerShell 7 (pwsh), and the VirtualDesktop module
   (Install-Module VirtualDesktop -Scope CurrentUser). Cursor must be installed.
 #>
@@ -22,12 +26,14 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $bin = Join-Path $BinDir 'wsm-windows.exe'
+$logPath = Join-Path $BinDir 'wsmd.log'
 
-Write-Host "==> Building wsm-windows"
+Write-Host "==> Building wsm-windows (headless / GUI subsystem)"
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 Push-Location $repoRoot
 try {
-    & go build -o $bin ./apps/wsm-windows
+    # -H windowsgui: no console window when the task launches it at logon.
+    & go build -ldflags '-H=windowsgui' -o $bin ./apps/wsm-windows
     if ($LASTEXITCODE -ne 0) { throw "go build failed ($LASTEXITCODE)" }
 }
 finally { Pop-Location }
@@ -40,7 +46,7 @@ if (-not (Test-Path -LiteralPath $ConfigPath)) {
 
 Write-Host "==> Registering Scheduled Task '$TaskName'"
 $me = "$env:USERDOMAIN\$env:USERNAME"
-$action = New-ScheduledTaskAction -Execute $bin -Argument ('-config "{0}"' -f $ConfigPath)
+$action = New-ScheduledTaskAction -Execute $bin -Argument ('-config "{0}" -log "{1}"' -f $ConfigPath, $logPath)
 
 $tLogon = New-ScheduledTaskTrigger -AtLogOn -User $me
 $tWatch = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 1)
@@ -55,6 +61,6 @@ Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($tLogon, $
     -Principal $principal -Settings $settings -Force | Out-Null
 Start-ScheduledTask -TaskName $TaskName
 
-Write-Host "==> Done. Health check:"
-Write-Host "    Invoke-WebRequest http://127.0.0.1:39788/health -UseBasicParsing   # -> ok"
+Write-Host "==> Done. Runs headless (no console window); logs to $logPath"
+Write-Host "    Health check: Invoke-WebRequest http://127.0.0.1:39788/health -UseBasicParsing   # -> ok"
 Write-Host "    Manage: Stop-/Disable-/Unregister-ScheduledTask -TaskName $TaskName"

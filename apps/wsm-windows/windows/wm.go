@@ -160,6 +160,7 @@ func (m *Manager) run(ctx context.Context, args []string) ([]byte, error) {
 	fullArgs := append([]string{"-NoLogo", "-NoProfile", "-File", script}, args...)
 
 	cmd := exec.CommandContext(ctx, pwsh, fullArgs...)
+	hideWindow(cmd) // keep the pwsh child headless (no console flash on Windows)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

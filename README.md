@@ -128,7 +128,13 @@ Now the dev box's `POST 127.0.0.1:39788` is forwarded back to `wsmd`.
   launchd LaunchAgent (`com.wsm.wsmd`).
 - **Windows** — `scripts/install-windows.ps1` builds the binary and registers a
   Scheduled Task (`wsmd`) that runs at logon with a watchdog. Requires the
-  [`VirtualDesktop`](https://github.com/MScholtes/PSVirtualDesktop) module.
+  [`VirtualDesktop`](https://github.com/MScholtes/PSVirtualDesktop) module. The
+  binary is built for the GUI subsystem (`-ldflags -H=windowsgui`) so it runs
+  **headless** — no console window when the task launches it at logon. Because
+  that discards stderr, the task passes `-log`, so the daemon writes to
+  `%LOCALAPPDATA%\wsm\wsmd.log` (which also captures the PowerShell helpers'
+  output). A plain `go build`/`go run` keeps the console so you still get live
+  logs while developing.
 
 ## Repo layout
 
