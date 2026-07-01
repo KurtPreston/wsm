@@ -1,6 +1,10 @@
 package webserver
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestValidateRequiresToken(t *testing.T) {
 	c := Default()
@@ -88,5 +92,93 @@ func TestActiveProfile(t *testing.T) {
 	p, ok := c.ActiveProfile()
 	if !ok || p.Process != "Cursor" {
 		t.Fatalf("active profile = %+v ok=%v", p, ok)
+	}
+}
+
+func TestValidateTunnelRequiresHost(t *testing.T) {
+	c := Default()
+	c.Token = "x"
+	c.Tunnel = &TunnelConfig{Enabled: true}
+	if err := c.Validate(); err == nil {
+		t.Fatal("expected error when tunnel.enabled but host is empty")
+	}
+	c.Tunnel.Host = "devbox"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("tunnel with host should validate: %v", err)
+	}
+}
+
+func TestValidateTunnelDisabledIgnoresHost(t *testing.T) {
+	c := Default()
+	c.Token = "x"
+	c.Tunnel = &TunnelConfig{Enabled: false}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("a disabled tunnel should not require host: %v", err)
+	}
+}
+
+func TestApplyTunnelDefaults(t *testing.T) {
+	c := Default()
+	c.Port = 39788
+	c.Tunnel = &TunnelConfig{Enabled: true, Host: "devbox"}
+	c.applyTunnelDefaults()
+	tn := c.Tunnel
+	if tn.Port != 22 {
+		t.Errorf("ssh port default = %d, want 22", tn.Port)
+	}
+	if tn.RemoteBind != "127.0.0.1" {
+		t.Errorf("remoteBind default = %q, want 127.0.0.1", tn.RemoteBind)
+	}
+	if tn.RemotePort != 39788 {
+		t.Errorf("remotePort default = %d, want 39788 (cfg.Port)", tn.RemotePort)
+	}
+	if tn.KeepAliveSec != 30 {
+		t.Errorf("keepAliveSec default = %d, want 30", tn.KeepAliveSec)
+	}
+	if tn.User == "" {
+		t.Error("user default should be non-empty")
+	}
+}
+
+func TestApplyTunnelDefaultsNoBlock(t *testing.T) {
+	c := Default()
+	c.applyTunnelDefaults() // must not panic when Tunnel is nil
+	if c.Tunnel != nil {
+		t.Fatal("applyTunnelDefaults should not materialize a tunnel block")
+	}
+}
+
+func TestExpandUser(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home dir on this platform")
+	}
+	if got, want := expandUser("~/.ssh/id_ed25519"), filepath.Join(home, ".ssh", "id_ed25519"); got != want {
+		t.Errorf("expandUser(~/...) = %q, want %q", got, want)
+	}
+	if got := expandUser("/abs/path"); got != "/abs/path" {
+		t.Errorf("absolute path should be unchanged, got %q", got)
+	}
+	if got := expandUser(""); got != "" {
+		t.Errorf("empty should stay empty, got %q", got)
+	}
+}
+
+func TestUnmarshalJSONCTunnel(t *testing.T) {
+	data := []byte(`{
+		"mode": "ssh",
+		"tunnel": {
+			"enabled": true,
+			"host": "dev-box.example.com",
+			"user": "me",
+			"identityFile": "~/.ssh/id_ed25519",
+		},
+	}`)
+	var c Config
+	if err := unmarshalJSONC(data, &c); err != nil {
+		t.Fatalf("unmarshalJSONC: %v", err)
+	}
+	if c.Tunnel == nil || !c.Tunnel.Enabled || c.Tunnel.Host != "dev-box.example.com" {
+		t.Fatalf("tunnel not parsed: %+v", c.Tunnel)
 	}
 }

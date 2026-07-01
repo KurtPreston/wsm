@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 
@@ -27,6 +28,34 @@ const (
 type TLSConfig struct {
 	Cert string `json:"cert"`
 	Key  string `json:"key"`
+}
+
+// TunnelConfig optionally lets wsmd establish and maintain its own reverse SSH
+// tunnel to a dev box, instead of relying on an external SSH session (e.g.
+// Cursor Remote-SSH) to carry the reverse forward. When enabled, wsmd dials the
+// host over SSH and serves its HTTP handler on a reverse listener bound to the
+// dev box's loopback, so the pipe is live whenever wsmd runs.
+type TunnelConfig struct {
+	// Enabled turns the built-in tunnel on. When false (or the whole block is
+	// absent), wsmd behaves exactly as before and creates no tunnel.
+	Enabled bool `json:"enabled"`
+	// Host is the SSH hostname/IP of the dev box to dial (required when enabled).
+	Host string `json:"host"`
+	// Port is the SSH port on the dev box (default 22).
+	Port int `json:"port"`
+	// User is the SSH user (default: the current OS user).
+	User string `json:"user"`
+	// IdentityFile is an optional private key path; empty falls back to ssh-agent.
+	IdentityFile string `json:"identityFile"`
+	// KnownHostsFile verifies the dev box's host key (default ~/.ssh/known_hosts).
+	KnownHostsFile string `json:"knownHostsFile"`
+	// RemoteBind is the interface the reverse listener binds on the dev box
+	// (default 127.0.0.1 — dev-box loopback only).
+	RemoteBind string `json:"remoteBind"`
+	// RemotePort is the reverse listener port on the dev box (default = cfg.Port).
+	RemotePort int `json:"remotePort"`
+	// KeepAliveSec is the SSH keepalive interval in seconds (default 30).
+	KeepAliveSec int `json:"keepAliveSec"`
 }
 
 // IDEProfile describes how to open a workspace in a particular IDE. Profiles
@@ -54,6 +83,7 @@ type Config struct {
 	IDE        string                `json:"ide"`
 	Profiles   map[string]IDEProfile `json:"profiles"`
 	CORSOrigin string                `json:"corsOrigin,omitempty"`
+	Tunnel     *TunnelConfig         `json:"tunnel,omitempty"`
 }
 
 // DefaultProfiles returns the out-of-the-box IDE profiles (Cursor + VSCode).
@@ -127,7 +157,74 @@ func Load(path string) (Config, error) {
 	if len(cfg.Profiles) == 0 {
 		cfg.Profiles = DefaultProfiles()
 	}
+	cfg.applyTunnelDefaults()
 	return cfg, nil
+}
+
+// applyTunnelDefaults fills unset tunnel fields and expands a leading ~ in the
+// path fields. It is a no-op when no tunnel block is configured.
+func (c *Config) applyTunnelDefaults() {
+	t := c.Tunnel
+	if t == nil {
+		return
+	}
+	if t.Port == 0 {
+		t.Port = 22
+	}
+	if t.User == "" {
+		t.User = currentUsername()
+	}
+	if t.RemoteBind == "" {
+		t.RemoteBind = "127.0.0.1"
+	}
+	if t.RemotePort == 0 {
+		t.RemotePort = c.Port
+	}
+	if t.KnownHostsFile == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			t.KnownHostsFile = filepath.Join(home, ".ssh", "known_hosts")
+		}
+	}
+	if t.KeepAliveSec == 0 {
+		t.KeepAliveSec = 30
+	}
+	t.IdentityFile = expandUser(t.IdentityFile)
+	t.KnownHostsFile = expandUser(t.KnownHostsFile)
+}
+
+// currentUsername returns the local login name, stripping a Windows DOMAIN\
+// prefix so it is usable as a default SSH user. Real setups should set
+// tunnel.user explicitly; this is only a fallback.
+func currentUsername() string {
+	u, err := user.Current()
+	if err != nil {
+		return ""
+	}
+	name := u.Username
+	if i := strings.LastIndexAny(name, `\/`); i >= 0 {
+		name = name[i+1:]
+	}
+	return name
+}
+
+// expandUser expands a leading ~ or ~/ (or ~\ on Windows) to the user's home
+// directory. Other paths are returned unchanged.
+func expandUser(p string) string {
+	if p == "" {
+		return p
+	}
+	if p == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			return home
+		}
+		return p
+	}
+	if strings.HasPrefix(p, "~/") || strings.HasPrefix(p, `~\`) {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, p[2:])
+		}
+	}
+	return p
 }
 
 func discoverConfigPath() string {
@@ -168,6 +265,11 @@ func (c Config) Validate() error {
 	}
 	if _, ok := c.ActiveProfile(); !ok {
 		return fmt.Errorf("ide %q has no matching entry in profiles", c.IDE)
+	}
+	if c.Tunnel != nil && c.Tunnel.Enabled {
+		if strings.TrimSpace(c.Tunnel.Host) == "" {
+			return errors.New("tunnel.enabled requires tunnel.host (the dev box to dial)")
+		}
 	}
 	return nil
 }
