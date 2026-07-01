@@ -57,12 +57,28 @@ func NewHandler(cfg Config, wm WindowManager) (http.Handler, error) {
 	s := &server{cfg: cfg, wm: wm}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", s.health)
-	mux.HandleFunc("GET /windows", requireBearer(cfg.Token, cfg.CORSOrigin, s.windows))
-	mux.HandleFunc("POST /open", requireBearer(cfg.Token, cfg.CORSOrigin, s.open))
-	mux.HandleFunc("POST /focus", requireBearer(cfg.Token, cfg.CORSOrigin, s.focus))
+	mux.HandleFunc("/health", methodGuard(http.MethodGet, s.health))
+	mux.HandleFunc("/windows", methodGuard(http.MethodGet, requireBearer(cfg.Token, cfg.CORSOrigin, s.windows)))
+	mux.HandleFunc("/open", methodGuard(http.MethodPost, requireBearer(cfg.Token, cfg.CORSOrigin, s.open)))
+	mux.HandleFunc("/focus", methodGuard(http.MethodPost, requireBearer(cfg.Token, cfg.CORSOrigin, s.focus)))
 
 	return withCORS(cfg.CORSOrigin, mux), nil
+}
+
+// methodGuard enforces the HTTP method for a route. Method-in-pattern routing
+// (e.g. "GET /windows") requires Go 1.22's ServeMux, but this module targets an
+// older Go floor, so we register literal paths and validate the method here.
+// Preflight OPTIONS requests are answered upstream by withCORS and never reach
+// these handlers.
+func methodGuard(method string, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != method {
+			w.Header().Set("Allow", method)
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		next(w, r)
+	}
 }
 
 // Serve validates the config and serves until the process exits. It uses HTTPS
