@@ -130,18 +130,6 @@ Now the dev box's `POST 127.0.0.1:39788` is forwarded back to `wsmd`.
   Scheduled Task (`wsmd`) that runs at logon with a watchdog. Requires the
   [`VirtualDesktop`](https://github.com/MScholtes/PSVirtualDesktop) module.
 
-## Migrating from docent-powershell (port 39787 → 39788)
-
-wsm is the successor to the standalone `docent-powershell` daemon, which
-defaulted to **39787** with a monolithic PowerShell HTTP server. wsm defaults to
-**39788** (the port grove/docent already expect) and Go now owns HTTP, auth, and
-config. If you ran the old daemon:
-
-- update any client webhook URLs and reverse-tunnel `RemoteForward` from
-  `39787` to `39788`,
-- replace the old PowerShell autostart with the install script above,
-- move your config to `wsm.config.jsonc` (see the example) and set a `token`.
-
 ## Repo layout
 
 ```
