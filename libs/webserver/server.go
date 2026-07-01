@@ -12,6 +12,7 @@ import (
 	"net/http"
 
 	"github.com/KurtPreston/wsm/libs/api"
+	"github.com/KurtPreston/wsm/libs/tunnel"
 )
 
 // ErrWindowNotFound is returned by WindowManager.Focus when no open window
@@ -82,11 +83,28 @@ func methodGuard(method string, next http.HandlerFunc) http.HandlerFunc {
 }
 
 // Serve validates the config and serves until the process exits. It uses HTTPS
-// in network mode and plain HTTP on loopback (local/ssh).
+// in network mode and plain HTTP on loopback (local/ssh). When a tunnel is
+// configured, the same handler is also served over a reverse SSH tunnel that
+// wsmd owns (see libs/tunnel), so the dev box can reach it without relying on
+// an external SSH session such as Cursor Remote-SSH.
 func Serve(cfg Config, wm WindowManager) error {
 	h, err := NewHandler(cfg, wm)
 	if err != nil {
 		return err
+	}
+	if cfg.Tunnel != nil && cfg.Tunnel.Enabled {
+		tc := tunnel.Config{
+			Host:           cfg.Tunnel.Host,
+			Port:           cfg.Tunnel.Port,
+			User:           cfg.Tunnel.User,
+			IdentityFile:   cfg.Tunnel.IdentityFile,
+			KnownHostsFile: cfg.Tunnel.KnownHostsFile,
+			RemoteBind:     cfg.Tunnel.RemoteBind,
+			RemotePort:     cfg.Tunnel.RemotePort,
+			KeepAliveSec:   cfg.Tunnel.KeepAliveSec,
+		}
+		log.Printf("wsmd tunnel enabled -> %s@%s:%d (remote %s:%d)", tc.User, tc.Host, tc.Port, tc.RemoteBind, tc.RemotePort)
+		go tunnel.Serve(context.Background(), tc, h)
 	}
 	srv := &http.Server{Addr: cfg.Addr(), Handler: h}
 	if cfg.UsesTLS() {
