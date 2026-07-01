@@ -1,0 +1,218 @@
+openapi: 3.1.0
+info:
+  title: Workspace Management API
+  version: "1.0.0"
+  description: |
+    The wsm (workspace-management) API lets clients open, focus, and list
+    workspaces (IDE windows) on a machine. Which IDE is opened and how is
+    config-driven; the out-of-the-box profiles target Cursor and VSCode.
+
+    The daemon (`wsmd`) runs in one of three modes:
+
+    * `local`   - binds 127.0.0.1, plain HTTP, Bearer token required.
+    * `ssh`     - binds 127.0.0.1, reached via an SSH reverse tunnel, Bearer token required.
+    * `network` - configurable bind, HTTPS/TLS required, explicitly opt-in.
+
+    Every endpoint except `GET /health` requires a Bearer token.
+servers:
+  - url: http://127.0.0.1:39788
+    description: Default local / ssh-tunnel deployment (loopback, HTTP)
+  - url: https://{host}:{port}
+    description: Network deployment (HTTPS, explicit opt-in)
+    variables:
+      host:
+        default: 0.0.0.0
+      port:
+        default: "39788"
+
+tags:
+  - name: health
+  - name: windows
+
+paths:
+  /health:
+    get:
+      tags: [health]
+      summary: Liveness probe
+      description: Returns plain-text `ok`. Unauthenticated so probes can poll freely.
+      security: []
+      responses:
+        "200":
+          description: Service is alive.
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: ok
+
+  /windows:
+    get:
+      tags: [windows]
+      summary: List open workspace windows
+      operationId: listWindows
+      responses:
+        "200":
+          description: The set of live IDE windows this daemon can see.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WindowsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /open:
+    post:
+      tags: [windows]
+      summary: Open (or adopt) a workspace
+      description: |
+        Open the configured IDE at the given path, optionally connected to a
+        remote `host`. If a window for the workspace already exists it is
+        adopted/focused rather than duplicated.
+      operationId: openWorkspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpenRequest"
+      responses:
+        "200":
+          description: The workspace was opened or adopted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Result"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /focus:
+    post:
+      tags: [windows]
+      summary: Focus an existing workspace window
+      description: Raise/focus an already-open window identified by `id` or `name`.
+      operationId: focusWorkspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FocusRequest"
+      responses:
+        "200":
+          description: The matching window was focused.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Result"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: No open window matched the request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid Bearer token.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    BadRequest:
+      description: The request body was missing required fields or malformed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    Window:
+      type: object
+      required: [id, title, app]
+      properties:
+        id:
+          type: string
+          description: Stable-ish window identifier (platform-specific).
+        title:
+          type: string
+          description: The window title as reported by the OS.
+        app:
+          type: string
+          description: The owning application/process name (e.g. Cursor).
+        host:
+          type: string
+          description: SSH host parsed from the title, when the window is a remote workspace.
+
+    WindowsResponse:
+      type: object
+      required: [windows]
+      properties:
+        windows:
+          type: array
+          items:
+            $ref: "#/components/schemas/Window"
+
+    OpenRequest:
+      type: object
+      required: [host, path]
+      properties:
+        host:
+          type: string
+          description: SSH host alias for a remote workspace. Empty for a local path.
+        path:
+          type: string
+          description: Absolute path of the folder to open (on `host` when remote).
+        name:
+          type: string
+          description: Workspace/desktop label. Derived from the path leaf when omitted.
+        uri:
+          type: string
+          description: Explicit folder URI. Overrides the config profile's URI templating.
+
+    FocusRequest:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Window id (as returned by GET /windows).
+        name:
+          type: string
+          description: Workspace name/leaf to match against window titles.
+        host:
+          type: string
+          description: Optional SSH host, used to disambiguate remote workspace titles.
+
+    Result:
+      type: object
+      required: [ok, action, name]
+      properties:
+        ok:
+          type: boolean
+        action:
+          type: string
+          description: What the daemon did (e.g. opened, focused, adopted).
+        name:
+          type: string
+          description: The resolved workspace name.
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+security:
+  - bearerAuth: []
