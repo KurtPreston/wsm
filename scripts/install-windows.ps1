@@ -9,6 +9,12 @@
   (required so it can move/focus windows). A repeating trigger relaunches it if
   it dies; MultipleInstances=IgnoreNew avoids duplicates.
 
+  Safe to re-run to upgrade in place: it disables + stops any existing task and
+  kills lingering daemon processes first, so the running .exe is unlocked before
+  the rebuild and the 1-minute watchdog can't relaunch mid-install. Your config
+  is left untouched (it is only written when none exists), and the task is
+  re-registered fresh (re-enabled) at the end.
+
   The binary is built for the GUI subsystem (-H windowsgui) so it runs headless
   with no console window; because that discards stderr, the task passes -log so
   the daemon writes to <BinDir>\wsmd.log instead.
@@ -27,6 +33,30 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $bin = Join-Path $BinDir 'wsm-windows.exe'
 $logPath = Join-Path $BinDir 'wsmd.log'
+
+# Stop any previous instance before rebuilding: the task holds an open handle to
+# $bin, so `go build -o $bin` would fail with "file in use". Disable first so the
+# 1-minute watchdog trigger can't relaunch the daemon while we build.
+if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+    Write-Host "==> Stopping + disabling existing task '$TaskName'"
+    Disable-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue | Out-Null
+    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+}
+
+# Kill lingering daemon processes (task-launched or manual) so the exe unlocks.
+Get-Process -Name 'wsm-windows' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+# Wait (up to ~5s) for the OS to release the file handle before overwriting it.
+if (Test-Path -LiteralPath $bin) {
+    for ($i = 0; $i -lt 50; $i++) {
+        try {
+            $fh = [System.IO.File]::Open($bin, 'Open', 'ReadWrite', 'None')
+            $fh.Close()
+            break
+        }
+        catch { Start-Sleep -Milliseconds 100 }
+    }
+}
 
 Write-Host "==> Building wsm-windows (headless / GUI subsystem)"
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
