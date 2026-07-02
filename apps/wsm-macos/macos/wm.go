@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/KurtPreston/wsm/libs/api"
 	"github.com/KurtPreston/wsm/libs/webserver"
@@ -40,11 +41,15 @@ func (m *Manager) List(_ context.Context, profile webserver.IDEProfile) ([]api.W
 	return wins, nil
 }
 
-// Open launches the IDE at the resolved URI and best-effort focuses it.
+// Open launches the IDE at the resolved URI and returns immediately. Focus runs
+// in the background so HTTP callers (e.g. grove's webhook) are not blocked.
 func (m *Manager) Open(_ context.Context, cmd webserver.OpenCommand) (api.Result, error) {
-	if err := openWorkspace(cmd.Profile, cmd.URI, cmd.Name); err != nil {
+	if err := launchWorkspace(cmd.Profile, cmd.URI); err != nil {
 		return api.Result{}, err
 	}
+	proc := processName(cmd.Profile)
+	leaf := cmd.Name
+	go focusWorkspaceWhenReady(proc, leaf)
 	return api.Result{OK: true, Action: "opened", Name: cmd.Name}, nil
 }
 
@@ -150,42 +155,42 @@ return "0"
 	return out == "1", nil
 }
 
-// openWorkspace launches the IDE with the resolved folder URI, using the
+// launchWorkspace starts the IDE with the resolved folder URI, using the
 // profile's explicit exe when set, else the IDE CLI on PATH, else `open -na`.
-func openWorkspace(profile webserver.IDEProfile, uri, leaf string) error {
+func launchWorkspace(profile webserver.IDEProfile, uri string) error {
 	args := launchArgs(profile, uri)
 	proc := processName(profile)
 
 	switch {
 	case profile.Exe != "":
-		if err := exec.Command(profile.Exe, args...).Start(); err != nil {
-			return err
-		}
+		return exec.Command(profile.Exe, args...).Start()
 	default:
 		if path, err := exec.LookPath(cliName(proc)); err == nil {
-			if err := exec.Command(path, args...).Start(); err != nil {
-				return err
-			}
-		} else {
-			openArgs := append([]string{"-na", appName(proc), "--args"}, args...)
-			if err := exec.Command("open", openArgs...).Start(); err != nil {
-				return err
-			}
+			return exec.Command(path, args...).Start()
 		}
+		openArgs := append([]string{"-na", appName(proc), "--args"}, args...)
+		return exec.Command("open", openArgs...).Start()
 	}
+}
 
-	// Best-effort: poll briefly and focus the new window.
-	for i := 0; i < 50; i++ {
+// focusWorkspaceWhenReady polls until a window title contains leaf, then raises it.
+func focusWorkspaceWhenReady(proc, leaf string) {
+	const (
+		openPollInterval = 200 * time.Millisecond
+		openPollMax      = 25 * time.Second
+	)
+	deadline := time.Now().Add(openPollMax)
+	for time.Now().Before(deadline) {
 		if titles, _ := listWindowTitles(proc); len(titles) > 0 {
 			for _, t := range titles {
 				if strings.Contains(t, leaf) {
 					_, _ = focusWindow(proc, leaf)
-					return nil
+					return
 				}
 			}
 		}
+		time.Sleep(openPollInterval)
 	}
-	return nil
 }
 
 // openBrowser launches a URL in a new browser window. When browserExe is set
